@@ -1,21 +1,10 @@
 // ============================================================
-// game.js — 행동 정의 / 수치 변화 / 단어 조합 판정
+// game.js — 수치 계산 / 단어 조합 판정
 // ============================================================
+import { getActions } from "./sheets.js";
 
-// -- 공개 수치 ----------------------------------------------------
 export const PUBLIC_STATS = ["지능", "매력", "체력", "감성", "사회성"];
-
-// -- 숨겨진 수치 --------------------------------------------------
 export const HIDDEN_STATS = ["도덕성", "야망", "위험도", "의존성", "스트레스", "평판", "전투"];
-
-// -- 초기 수치 ----------------------------------------------------
-export const INITIAL_STATS = {
-  지능: 20, 매력: 20, 체력: 20, 감성: 20, 사회성: 20,
-};
-export const INITIAL_HIDDEN = {
-  도덕성: 50, 야망: 10, 위험도: 0, 의존성: 0,
-  스트레스: 10, 평판: 20, 전투: 0,
-};
 
 // -- 나잇대 계산 --------------------------------------------------
 export function getAge(turn) {
@@ -30,74 +19,10 @@ export function getPhase(turn) {
   return "완성 단계";
 }
 
-// -- 행동 정의 ----------------------------------------------------
-// minAge: 이 나이 이상일 때만 선택 가능
-// gold: 양수=수입, 음수=지출, 0=변화없음
-// effects: 공개/숨김 수치 모두 기입 가능
-
-export const ACTIONS = {
-
-  // 교육 (골드 지출)
-  "기초학습":     { category: "교육", minAge: 8,  gold: -50,  effects: { 지능: 3 } },
-  "음악입문":     { category: "교육", minAge: 8,  gold: -70,  effects: { 감성: 2, 매력: 1 } },
-  "댄스입문":     { category: "교육", minAge: 8,  gold: -80,  effects: { 매력: 2, 감성: 1 } },
-  "검술입문":     { category: "교육", minAge: 8,  gold: -80,  effects: { 체력: 2, 전투: 1 } },
-  "요리기초":     { category: "교육", minAge: 8,  gold: -40,  effects: { 감성: 1, 평판: 1 } },
-  "예절기초":     { category: "교육", minAge: 8,  gold: -60,  effects: { 사회성: 2, 매력: 1 } },
-
-  "고급학습":     { category: "교육", minAge: 13, gold: -120, effects: { 지능: 5 } },
-  "마법수업":     { category: "교육", minAge: 13, gold: -150, effects: { 지능: 3, 감성: 3 } },
-  "검술중급":     { category: "교육", minAge: 13, gold: -150, effects: { 체력: 3, 전투: 3 } },
-  "예절교육":     { category: "교육", minAge: 13, gold: -100, effects: { 매력: 2, 사회성: 3 } },
-  "미술수업":     { category: "교육", minAge: 13, gold: -110, effects: { 감성: 3, 매력: 2 } },
-  "상술강좌":     { category: "교육", minAge: 13, gold: -90,  effects: { 사회성: 2, 평판: 2 } },
-
-  "왕실교육":     { category: "교육", minAge: 17, gold: -300, effects: { 매력: 3, 사회성: 3, 평판: 3 } },
-  "마법고급":     { category: "교육", minAge: 17, gold: -280, effects: { 지능: 5, 감성: 3 } },
-  "기사수련":     { category: "교육", minAge: 17, gold: -280, effects: { 체력: 5, 전투: 5 } },
-  "외교술":       { category: "교육", minAge: 17, gold: -250, effects: { 사회성: 5, 평판: 3 } },
-  "신학":         { category: "교육", minAge: 17, gold: -200, effects: { 도덕성: 5, 감성: 3 } },
-  "연금술":       { category: "교육", minAge: 17, gold: -260, effects: { 지능: 3, 야망: 2 } },
-
-  // 아르바이트 (골드 수입)
-  "심부름":       { category: "아르바이트", minAge: 8,  gold: 30,  effects: { 체력: -1 } },
-  "청소도우미":   { category: "아르바이트", minAge: 8,  gold: 40,  effects: { 체력: -1, 스트레스: 1 } },
-  "텃밭일손":     { category: "아르바이트", minAge: 8,  gold: 35,  effects: { 체력: -1, 감성: 1 } },
-  "제과점보조":   { category: "아르바이트", minAge: 8,  gold: 45,  effects: { 매력: 1, 스트레스: 1 } },
-  "빨래배달":     { category: "아르바이트", minAge: 8,  gold: 30,  effects: { 체력: -2 } },
-  "급사":         { category: "아르바이트", minAge: 8,  gold: 50,  effects: { 사회성: 1, 스트레스: 1 } },
-
-  "세탁소":       { category: "아르바이트", minAge: 13, gold: 80,  effects: { 체력: -2, 스트레스: 1 } },
-  "시장상인보조": { category: "아르바이트", minAge: 13, gold: 90,  effects: { 사회성: 1, 스트레스: 1 } },
-  "사서보조":     { category: "아르바이트", minAge: 13, gold: 70,  effects: { 지능: 1 } },
-  "마구간관리":   { category: "아르바이트", minAge: 13, gold: 85,  effects: { 체력: -1, 감성: 1 } },
-  "약초상보조":   { category: "아르바이트", minAge: 13, gold: 75,  effects: { 지능: 1, 감성: 1 } },
-  "여관서빙":     { category: "아르바이트", minAge: 13, gold: 100, effects: { 매력: 1, 사회성: 1, 스트레스: 1 } },
-
-  "가정교사":     { category: "아르바이트", minAge: 17, gold: 150, effects: { 지능: 1, 사회성: 1 } },
-  "경호원":       { category: "아르바이트", minAge: 17, gold: 180, effects: { 체력: -2, 스트레스: 2 } },
-  "약초채집":     { category: "아르바이트", minAge: 17, gold: 130, effects: { 체력: -1, 감성: 1 } },
-  "통역사보조":   { category: "아르바이트", minAge: 17, gold: 160, effects: { 지능: 1, 사회성: 2 } },
-  "기사단훈련보조": { category: "아르바이트", minAge: 17, gold: 170, effects: { 체력: -1, 전투: 1 } },
-  "귀족서기":     { category: "아르바이트", minAge: 17, gold: 200, effects: { 지능: 2, 평판: 1 } },
-
-  // 휴식 (골드 변화 없음)
-  "휴식":         { category: "휴식", minAge: 8, gold: 0, effects: { 스트레스: -4, 체력: 1 } },
-  "명상":         { category: "휴식", minAge: 8, gold: 0, effects: { 감성: 3, 스트레스: -3, 도덕성: 1 } },
-  "산책":         { category: "휴식", minAge: 8, gold: 0, effects: { 스트레스: -2, 감성: 1 } },
-
-  // 사교
-  "사교":         { category: "사교", minAge: 8, gold: 0,   effects: { 매력: 2, 사회성: 2, 평판: 1, 스트레스: -1 } },
-  "연회":         { category: "사교", minAge: 8, gold: -50, effects: { 매력: 3, 사회성: 1, 평판: 2, 의존성: 1 } },
-  "봉사":         { category: "사교", minAge: 8, gold: 0,   effects: { 도덕성: 2, 사회성: 1, 평판: 1 } },
-
-  // 무사수행 (별도 봇 연계)
-  "무사수행":     { category: "무사수행", minAge: 8, gold: 0, effects: {} },
-};
-
 // -- 유효성 검사 --------------------------------------------------
-export function validateSchedule(actions, age) {
-  const errors = [];
+export async function validateSchedule(actions, age) {
+  const ACTIONS = await getActions();
+  const errors  = [];
 
   if (actions.length !== 3) {
     errors.push("행동은 정확히 3개여야 합니다");
@@ -124,11 +49,12 @@ export function validateSchedule(actions, age) {
 }
 
 // -- 행동 적용 ----------------------------------------------------
-export function applyActions(player, actions) {
-  const stats  = { ...player.stats };
-  const hidden = { ...player.hidden };
-  let   gold   = player.gold;
-  const log    = [];
+export async function applyActions(player, actions) {
+  const ACTIONS = await getActions();
+  const stats   = { ...player.stats };
+  const hidden  = { ...player.hidden };
+  let   gold    = player.gold;
+  const log     = [];
 
   const counts = {};
   for (const name of actions) counts[name] = (counts[name] ?? 0) + 1;
@@ -139,29 +65,23 @@ export function applyActions(player, actions) {
       continue;
     }
 
-    const action  = ACTIONS[name];
+    const action = ACTIONS[name];
     if (!action) continue;
 
-    const penalty = counts[name] > 1 ? 0.5 : 1;
-    const changes = [];
-
-    // 골드 변화
+    const penalty   = counts[name] > 1 ? 0.5 : 1;
+    const changes   = [];
     const goldDelta = Math.round(action.gold * penalty);
     gold = Math.max(0, gold + goldDelta);
 
-    // 수치 변화
     for (const [stat, delta] of Object.entries(action.effects)) {
       const adjusted = Math.round(delta * penalty);
       if (adjusted === 0) continue;
 
       if (PUBLIC_STATS.includes(stat)) {
         stats[stat] = clamp(stats[stat] + adjusted, 0, 100);
+        changes.push(`${stat}${adjusted > 0 ? "+" : ""}${adjusted}`);
       } else {
         hidden[stat] = clamp(hidden[stat] + adjusted, 0, 100);
-      }
-
-      if (PUBLIC_STATS.includes(stat)) {
-        changes.push(`${stat}${adjusted > 0 ? "+" : ""}${adjusted}`);
       }
     }
 
@@ -179,24 +99,8 @@ export function applyActions(player, actions) {
     hidden,
     gold,
     turn:    player.turn + 1,
-    history: [
-      ...player.history,
-      { turn: player.turn, actions, log },
-    ],
+    history: [...(player.history ?? []), { turn: player.turn, actions, log }],
   };
-}
-
-// -- 장착 아이템 효과 적용 ----------------------------------------
-export function applyEquipment(baseStats, equipped, items) {
-  const stats = { ...baseStats };
-  for (const itemName of Object.values(equipped)) {
-    const item = items[itemName];
-    if (!item?.equip) continue;
-    for (const [stat, delta] of Object.entries(item.equip)) {
-      if (stat in stats) stats[stat] = clamp(stats[stat] + delta, 0, 100);
-    }
-  }
-  return stats;
 }
 
 function clamp(v, min = 0, max = 100) {
