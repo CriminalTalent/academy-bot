@@ -3,10 +3,11 @@
 // ============================================================
 import "dotenv/config";
 import { createRestAPIClient, createStreamingAPIClient } from "masto";
-import { buildShopList, buildWallet }   from "./items.js";
-import { getItems }                     from "./sheets.js";
-import { getAge }                       from "./game.js";
-import { getPlayer, updatePlayer, getAllPlayers } from "./storage.js";
+import { buildShopList, buildWallet, isEquippable, isConsumable, isFood } from "./items.js";
+import { getItems }                                      from "./sheets.js";
+import { getAge }                                        from "./game.js";
+import { getPlayer, updatePlayer, getAllPlayers }         from "./storage.js";
+import { drawThree, buildTarotReading }                  from "./tarot.js";
 
 const GM_ID        = process.env.GM_ACCOUNT_ID ?? "";
 const BOT_TOKEN    = process.env.SHOP_BOT_TOKEN;
@@ -31,16 +32,17 @@ async function init() {
   console.log("상가 봇 시작: @" + BOT_HANDLE);
 }
 
+// -- 전송 유틸 ----------------------------------------------------
 async function reply(notification, text) {
   const chunks = splitText(text, 480);
   let replyId  = notification.status?.id;
   for (const chunk of chunks) {
-    const status = await rest.v1.statuses.create({
+    const s = await rest.v1.statuses.create({
       status:      `@${notification.account.acct} ${chunk}`,
       inReplyToId: replyId,
       visibility:  notification.status?.visibility ?? "unlisted",
     });
-    replyId = status.id;
+    replyId = s.id;
   }
 }
 
@@ -67,7 +69,21 @@ function clamp(v, min = 0, max = 100) {
   return Math.min(max, Math.max(min, v));
 }
 
-// -- 명령 처리 -----------------------------------------------------
+// -- 아이템 효과 적용 (수치 계산) ---------------------------------
+function applyEffects(stats, hidden, effects, sign = 1) {
+  const s = { ...stats };
+  const h = { ...hidden };
+  for (const [stat, delta] of Object.entries(effects ?? {})) {
+    const adjusted = delta * sign;
+    if (stat in s) s[stat] = clamp(s[stat] + adjusted, 0, 100);
+    if (stat in h) h[stat] = clamp(h[stat] + adjusted, 0, 100);
+  }
+  return { stats: s, hidden: h };
+}
+
+// ================================================================
+// 명령 처리
+// ================================================================
 async function handleNotification(notification) {
   if (notification.type !== "mention")               return;
   if (!notification.status || !notification.account) return;
@@ -83,25 +99,40 @@ async function handleNotification(notification) {
   const age    = getAge(player.turn);
   const ITEMS  = await getItems();
 
-  // -- [주머니] -----------------------------------------------------
+  // -- [주머니] ---------------------------------------------------
   if (tokens.some((t) => t.key === "주머니")) {
     await reply(notification, buildWallet(player));
     return;
   }
 
-  // -- [상가/무기상|의상실|잡화점] ----------------------------------
+  // -- [타로] ------------------------------------------------------
+  if (tokens.some((t) => t.key === "타로")) {
+    const cards   = drawThree();
+    const reading = buildTarotReading(cards);
+    await reply(notification, reading);
+    return;
+  }
+
+  // -- [상가/상점명] ----------------------------------------------
   const shopToken = tokens.find((t) => t.key === "상가");
   if (shopToken) {
     const shopName = shopToken.value;
-    if (!["무기상", "의상실", "잡화점"].includes(shopName)) {
-      await reply(notification, `'${shopName}'은(는) 없는 상점입니다.\n상점 목록: 무기상 / 의상실 / 잡화점`);
+    const valid    = ["무기상", "의상실", "잡화점"];
+    if (!valid.includes(shopName)) {
+      await reply(notification, `'${shopName}'은(는) 없는 상점입니다.\n상점 목록: ${valid.join(" / ")}`);
       return;
     }
     await reply(notification, await buildShopList(shopName));
     return;
   }
 
-  // -- [구매/상품명] ------------------------------------------------
+  // -- [레스토랑] -------------------------------------------------
+  if (tokens.some((t) => t.key === "레스토랑")) {
+    await reply(notification, await buildShopList("레스토랑"));
+    return;
+  }
+
+  // -- [구매/상품명] -----------------------------------------------
   const buyToken = tokens.find((t) => t.key === "구매");
   if (buyToken) {
     const itemName = buyToken.value;
@@ -120,13 +151,40 @@ async function handleNotification(notification) {
       return;
     }
 
-    const updated = { ...player, gold: player.gold - item.price, inventory: [...(player.inventory ?? []), itemName] };
+    // 음식(레스토랑) — 즉시 효과, 인벤토리 미저장
+    if (isFood(item.slot)) {
+      const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects);
+      await updatePlayer({ ...player, stats, hidden, gold: player.gold - item.price });
+
+      const effectText = Object.entries(item.effects ?? {})
+        .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`)
+        .join(", ");
+      await reply(notification, [
+        `[${item.shop}] ${itemName} — ${item.price}G 지출`,
+        effectText ? `효과: ${effectText}` : "",
+        `잔액: ${player.gold - item.price}G`,
+      ].filter(Boolean).join("\n"));
+      return;
+    }
+
+    // 그 외 — 인벤토리에 추가
+    const updated = {
+      ...player,
+      gold:      player.gold - item.price,
+      inventory: [...(player.inventory ?? []), itemName],
+    };
     await updatePlayer(updated);
-    await reply(notification, `[구매 완료] ${itemName} — ${item.price}G 지출\n잔액: ${updated.gold}G`);
+
+    const slotNote = isConsumable(item.slot) ? "\n[사용/이름] 으로 소비할 수 있습니다." : "";
+    await reply(notification, [
+      `[구매 완료] ${itemName} — ${item.price}G 지출`,
+      `잔액: ${updated.gold}G`,
+      slotNote,
+    ].filter(Boolean).join("\n"));
     return;
   }
 
-  // -- [판매/상품명] ------------------------------------------------
+  // -- [판매/상품명] -----------------------------------------------
   const sellToken = tokens.find((t) => t.key === "판매");
   if (sellToken) {
     const itemName = sellToken.value;
@@ -146,17 +204,16 @@ async function handleNotification(notification) {
       return;
     }
 
-    const sellPrice = Math.floor(item.price * item.sellRate);
+    const sellPrice = Math.floor(item.price * (item.sellRate ?? 0.5));
     const newInv    = [...inv];
     newInv.splice(newInv.indexOf(itemName), 1);
 
-    const updated = { ...player, gold: player.gold + sellPrice, inventory: newInv };
-    await updatePlayer(updated);
-    await reply(notification, `[판매 완료] ${itemName} — ${sellPrice}G 수령\n잔액: ${updated.gold}G`);
+    await updatePlayer({ ...player, gold: player.gold + sellPrice, inventory: newInv });
+    await reply(notification, `[판매 완료] ${itemName} — ${sellPrice}G 수령\n잔액: ${player.gold + sellPrice}G`);
     return;
   }
 
-  // -- [장착/상품명] ------------------------------------------------
+  // -- [장착/상품명] -----------------------------------------------
   const equipToken = tokens.find((t) => t.key === "장착");
   if (equipToken) {
     const itemName = equipToken.value;
@@ -171,49 +228,65 @@ async function handleNotification(notification) {
       await reply(notification, `'${itemName}'을(를) 보유하고 있지 않습니다.`);
       return;
     }
-
-    const newStats  = { ...player.stats };
-    const newHidden = { ...player.hidden };
-
-    // 즉시 소모 아이템 (slot = none)
-    if (item.slot === "none") {
-      for (const [stat, delta] of Object.entries(item.effects)) {
-        if (stat in newStats)  newStats[stat]  = clamp(newStats[stat]  + delta, 0, 100);
-        if (stat in newHidden) newHidden[stat] = clamp(newHidden[stat] + delta, 0, 100);
-      }
-      const newInv = [...inv];
-      newInv.splice(newInv.indexOf(itemName), 1);
-      await updatePlayer({ ...player, stats: newStats, hidden: newHidden, inventory: newInv });
-      const effectText = Object.entries(item.effects).map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`).join(", ");
-      await reply(notification, `[사용 완료] ${itemName}\n효과: ${effectText}`);
+    if (!isEquippable(item.slot)) {
+      await reply(notification, `'${itemName}'은(는) 장착할 수 없습니다.\n소비 아이템은 [사용/${itemName}] 을 사용하세요.`);
       return;
     }
 
-    // 장착형 아이템
     const slot     = item.slot;
     const prevItem = player.equipped?.[slot];
 
-    if (prevItem && ITEMS[prevItem]?.effects) {
-      for (const [stat, delta] of Object.entries(ITEMS[prevItem].effects)) {
-        if (stat in newStats)  newStats[stat]  = clamp(newStats[stat]  - delta, 0, 100);
-        if (stat in newHidden) newHidden[stat] = clamp(newHidden[stat] - delta, 0, 100);
-      }
-    }
-    for (const [stat, delta] of Object.entries(item.effects ?? {})) {
-      if (stat in newStats)  newStats[stat]  = clamp(newStats[stat]  + delta, 0, 100);
-      if (stat in newHidden) newHidden[stat] = clamp(newHidden[stat] + delta, 0, 100);
-    }
+    // 이전 아이템 효과 제거
+    let { stats, hidden } = applyEffects(player.stats, player.hidden,
+      prevItem ? (ITEMS[prevItem]?.effects ?? {}) : {}, -1
+    );
+
+    // 새 아이템 효과 적용
+    ({ stats, hidden } = applyEffects(stats, hidden, item.effects ?? {}, 1));
 
     const newEquipped = { ...(player.equipped ?? {}), [slot]: itemName };
-    await updatePlayer({ ...player, stats: newStats, hidden: newHidden, equipped: newEquipped });
+    await updatePlayer({ ...player, stats, hidden, equipped: newEquipped });
 
     const effectText = Object.entries(item.effects ?? {}).map(([k, v]) => `${k}+${v}`).join(", ");
     const prevNote   = prevItem ? ` (기존 ${prevItem} 해제)` : "";
-    await reply(notification, `[장착 완료] ${itemName}${prevNote}\n효과: ${effectText}`);
+    await reply(notification, `[장착 완료] ${itemName}${prevNote}\n효과: ${effectText || "-"}`);
     return;
   }
 
-  // -- [제거/상품명] ------------------------------------------------
+  // -- [사용/상품명] — consumable 아이템 소비 ----------------------
+  const useToken = tokens.find((t) => t.key === "사용");
+  if (useToken) {
+    const itemName = useToken.value;
+    const item     = ITEMS[itemName];
+    const inv      = player.inventory ?? [];
+
+    if (!item) {
+      await reply(notification, `'${itemName}'은(는) 없는 상품입니다.`);
+      return;
+    }
+    if (!inv.includes(itemName)) {
+      await reply(notification, `'${itemName}'을(를) 보유하고 있지 않습니다.`);
+      return;
+    }
+    if (!isConsumable(item.slot)) {
+      await reply(notification, `'${itemName}'은(는) 소비 아이템이 아닙니다.`);
+      return;
+    }
+
+    const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects ?? {}, 1);
+    const newInv            = [...inv];
+    newInv.splice(newInv.indexOf(itemName), 1);
+
+    await updatePlayer({ ...player, stats, hidden, inventory: newInv });
+
+    const effectText = Object.entries(item.effects ?? {})
+      .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`)
+      .join(", ");
+    await reply(notification, `[사용 완료] ${itemName}\n효과: ${effectText || "-"}`);
+    return;
+  }
+
+  // -- [제거/상품명] -----------------------------------------------
   const unequipToken = tokens.find((t) => t.key === "제거");
   if (unequipToken) {
     const itemName    = unequipToken.value;
@@ -230,24 +303,19 @@ async function handleNotification(notification) {
       return;
     }
 
-    const newStats  = { ...player.stats };
-    const newHidden = { ...player.hidden };
-    for (const [stat, delta] of Object.entries(item.effects ?? {})) {
-      if (stat in newStats)  newStats[stat]  = clamp(newStats[stat]  - delta, 0, 100);
-      if (stat in newHidden) newHidden[stat] = clamp(newHidden[stat] - delta, 0, 100);
-    }
-
-    const newEquipped = { ...equippedMap };
+    const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects ?? {}, -1);
+    const newEquipped       = { ...equippedMap };
     delete newEquipped[slot];
-    await updatePlayer({ ...player, stats: newStats, hidden: newHidden, equipped: newEquipped });
+
+    await updatePlayer({ ...player, stats, hidden, equipped: newEquipped });
     await reply(notification, `[제거 완료] ${itemName}\n슬롯 [${slot}] 비어있음`);
     return;
   }
 
   // -- GM 전용: [골드지급/이름/금액] [골드차감/이름/금액] ----------
   if (isGM) {
-    const raw       = notification.status.content.replace(/<[^>]+>/g, " ");
-    const gmMatch   = raw.match(/\[(골드지급|골드차감)\/([^/\]]+)\/(\d+)\]/);
+    const raw     = notification.status.content.replace(/<[^>]+>/g, " ");
+    const gmMatch = raw.match(/\[(골드지급|골드차감)\/([^/\]]+)\/(\d+)\]/);
     if (gmMatch) {
       const [, cmd, name, amountStr] = gmMatch;
       const amount  = parseInt(amountStr, 10);
@@ -274,7 +342,9 @@ async function handleNotification(notification) {
 async function main() {
   await init();
   console.log("스트리밍 연결 중...");
+
   const stream = await streaming.user.subscribe();
+
   for await (const event of stream) {
     if (event.event !== "notification") continue;
     const notification = event.payload;
