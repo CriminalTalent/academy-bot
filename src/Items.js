@@ -1,28 +1,28 @@
 // ============================================================
 // items.js — 상점 목록 / 주머니 출력
 // ============================================================
-// 시트 슬롯 종류:
-//   weapon     — 무기 슬롯, 장착형
-//   clothing   — 의상 슬롯, 장착형
-//   accessory  — 악세서리 슬롯, 장착형
-//   shield     — 방패 슬롯, 장착형
-//   consumable — 인벤토리 보관, [사용/이름] 으로 소비
-//   food       — 레스토랑 음식, 즉시 효과 (인벤토리 미저장)
+// 슬롯 종류 (시트 드롭다운 값 기준):
+//   무기     — 무기 슬롯, 장착형
+//   의상     — 의상 슬롯, 장착형
+//   악세서리 — 악세서리 슬롯, 장착형
+//   방패     — 방패 슬롯, 장착형
+//   소비     — 인벤토리 보관, [사용/이름] 으로 소비
+//   음식     — 레스토랑 음식, 즉시 효과 (인벤토리 미저장)
 // ============================================================
 import { getItems } from "./sheets.js";
 
-export const EQUIP_SLOTS = ["weapon", "clothing", "accessory", "shield"];
+export const EQUIP_SLOTS = ["무기", "의상", "악세서리", "방패"];
 
 export function isEquippable(slot) {
   return EQUIP_SLOTS.includes(slot);
 }
 
 export function isConsumable(slot) {
-  return slot === "consumable";
+  return slot === "소비";
 }
 
 export function isFood(slot) {
-  return slot === "food" || slot === "none";
+  return slot === "음식";
 }
 
 // -- 상점별 목록 출력 ---------------------------------------------
@@ -53,7 +53,6 @@ export function buildWallet(player) {
     .map(([slot, name]) => `  ${slot}: ${name}`)
     .join("\n") || "  없음";
 
-  // 장착 중이 아닌 아이템 (consumable 포함)
   const bagItems = (player.inventory ?? []).filter((n) => !equippedNames.includes(n));
   const bagLines = bagItems.length > 0
     ? bagItems.map((n) => `  ${n}`).join("\n")
