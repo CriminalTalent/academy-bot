@@ -266,3 +266,64 @@ function makeDefaultPlayer(accountId, name) {
     equipped:  {},
   };
 }
+
+
+// ================================================================
+// Monsters 시트
+// ================================================================
+// 헤더: 마물명 | 장소 | 최소나이 | HP | 공격력 | 방어력 | 골드최소 | 골드최대 | 설명
+
+let _monstersCache   = null;
+let _monstersCacheAt = 0;
+
+export async function getMonsters() {
+  if (_monstersCache && Date.now() - _monstersCacheAt < CACHE_TTL) {
+    return _monstersCache;
+  }
+
+  // 헤더: 마물명 | 장소 | 종류 | 최소나이 | HP | 공격력 | 방어력 | 골드최소 | 골드최대 | 대화텍스트 | 설명
+  // 종류: monster | boss | villager
+  const rows   = await readRange("Monsters!A2:K");
+  const result = {};
+
+  for (const row of rows) {
+    if (!row[0]) continue;
+    const [name, location, type, minAge, hp, attack, defense, goldMin, goldMax, dialogue, desc] = row;
+    result[name] = {
+      name,
+      location,
+      type:     type     ?? "monster",
+      minAge:   Number(minAge  ?? 0),
+      hp:       Number(hp      ?? 10),
+      maxHp:    Number(hp      ?? 10),
+      attack:   Number(attack  ?? 3),
+      defense:  Number(defense ?? 1),
+      goldMin:  Number(goldMin ?? 10),
+      goldMax:  Number(goldMax ?? 30),
+      dialogue: dialogue ?? "",
+      desc:     desc     ?? "",
+    };
+  }
+
+  _monstersCache   = result;
+  _monstersCacheAt = Date.now();
+  return result;
+}
+
+// 장소별 마물 목록 반환
+export async function getMonstersByLocation(location) {
+  const monsters = await getMonsters();
+  return Object.entries(monsters)
+    .filter(([, m]) => m.location === location)
+    .map(([name, m]) => ({ name, ...m }));
+}
+
+// 장소 목록 (중복 제거)
+export async function getLocations(age) {
+  const monsters = await getMonsters();
+  const locs = new Set();
+  for (const m of Object.values(monsters)) {
+    if (age >= m.minAge) locs.add(m.location);
+  }
+  return [...locs];
+}
