@@ -32,7 +32,6 @@ async function init() {
   console.log("상가 봇 시작: @" + BOT_HANDLE);
 }
 
-// -- 전송 유틸 ----------------------------------------------------
 async function reply(notification, text) {
   const chunks = splitText(text, 480);
   let replyId  = notification.status?.id;
@@ -69,7 +68,6 @@ function clamp(v, min = 0, max = 100) {
   return Math.min(max, Math.max(min, v));
 }
 
-// -- 아이템 효과 적용 (수치 계산) ---------------------------------
 function applyEffects(stats, hidden, effects, sign = 1) {
   const s = { ...stats };
   const h = { ...hidden };
@@ -105,7 +103,7 @@ async function handleNotification(notification) {
     return;
   }
 
-  // -- [타로] ------------------------------------------------------
+  // -- [타로] -----------------------------------------------------
   if (tokens.some((t) => t.key === "타로")) {
     const cards   = drawThree();
     const reading = buildTarotReading(cards);
@@ -151,14 +149,12 @@ async function handleNotification(notification) {
       return;
     }
 
-    // 음식(레스토랑) — 즉시 효과, 인벤토리 미저장
+    // 음식 — 즉시 효과, 인벤토리 미저장
     if (isFood(item.slot)) {
       const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects);
       await updatePlayer({ ...player, stats, hidden, gold: player.gold - item.price });
-
       const effectText = Object.entries(item.effects ?? {})
-        .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`)
-        .join(", ");
+        .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`).join(", ");
       await reply(notification, [
         `[${item.shop}] ${itemName} — ${item.price}G 지출`,
         effectText ? `효과: ${effectText}` : "",
@@ -167,14 +163,13 @@ async function handleNotification(notification) {
       return;
     }
 
-    // 그 외 — 인벤토리에 추가
+    // 그 외 — 인벤토리 추가
     const updated = {
       ...player,
       gold:      player.gold - item.price,
       inventory: [...(player.inventory ?? []), itemName],
     };
     await updatePlayer(updated);
-
     const slotNote = isConsumable(item.slot) ? "\n[사용/이름] 으로 소비할 수 있습니다." : "";
     await reply(notification, [
       `[구매 완료] ${itemName} — ${item.price}G 지출`,
@@ -207,7 +202,6 @@ async function handleNotification(notification) {
     const sellPrice = Math.floor(item.price * (item.sellRate ?? 0.5));
     const newInv    = [...inv];
     newInv.splice(newInv.indexOf(itemName), 1);
-
     await updatePlayer({ ...player, gold: player.gold + sellPrice, inventory: newInv });
     await reply(notification, `[판매 완료] ${itemName} — ${sellPrice}G 수령\n잔액: ${player.gold + sellPrice}G`);
     return;
@@ -229,19 +223,19 @@ async function handleNotification(notification) {
       return;
     }
     if (!isEquippable(item.slot)) {
-      await reply(notification, `'${itemName}'은(는) 장착할 수 없습니다.\n소비 아이템은 [사용/${itemName}] 을 사용하세요.`);
+      const hint = isConsumable(item.slot) ? ` [사용/${itemName}] 을 사용하세요.` : "";
+      await reply(notification, `'${itemName}'은(는) 장착할 수 없는 아이템입니다.${hint}`);
       return;
     }
 
     const slot     = item.slot;
     const prevItem = player.equipped?.[slot];
 
-    // 이전 아이템 효과 제거
-    let { stats, hidden } = applyEffects(player.stats, player.hidden,
-      prevItem ? (ITEMS[prevItem]?.effects ?? {}) : {}, -1
+    let { stats, hidden } = applyEffects(
+      player.stats, player.hidden,
+      prevItem ? (ITEMS[prevItem]?.effects ?? {}) : {},
+      -1
     );
-
-    // 새 아이템 효과 적용
     ({ stats, hidden } = applyEffects(stats, hidden, item.effects ?? {}, 1));
 
     const newEquipped = { ...(player.equipped ?? {}), [slot]: itemName };
@@ -253,7 +247,7 @@ async function handleNotification(notification) {
     return;
   }
 
-  // -- [사용/상품명] — consumable 아이템 소비 ----------------------
+  // -- [사용/상품명] — 소비 아이템 --------------------------------
   const useToken = tokens.find((t) => t.key === "사용");
   if (useToken) {
     const itemName = useToken.value;
@@ -276,12 +270,10 @@ async function handleNotification(notification) {
     const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects ?? {}, 1);
     const newInv            = [...inv];
     newInv.splice(newInv.indexOf(itemName), 1);
-
     await updatePlayer({ ...player, stats, hidden, inventory: newInv });
 
     const effectText = Object.entries(item.effects ?? {})
-      .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`)
-      .join(", ");
+      .map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`).join(", ");
     await reply(notification, `[사용 완료] ${itemName}\n효과: ${effectText || "-"}`);
     return;
   }
@@ -306,7 +298,6 @@ async function handleNotification(notification) {
     const { stats, hidden } = applyEffects(player.stats, player.hidden, item.effects ?? {}, -1);
     const newEquipped       = { ...equippedMap };
     delete newEquipped[slot];
-
     await updatePlayer({ ...player, stats, hidden, equipped: newEquipped });
     await reply(notification, `[제거 완료] ${itemName}\n슬롯 [${slot}] 비어있음`);
     return;
