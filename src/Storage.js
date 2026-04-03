@@ -1,92 +1,79 @@
 // ============================================================
-// storage.js — 플레이어 데이터 (Google Sheets 기반)
-//              히스토리만 로컬 JSON에 저장
+// storage.js
 // ============================================================
 import fs   from "fs";
 import path from "path";
-import {
-  sheetGetPlayer,
-  sheetUpdatePlayer,
-  sheetGetAllPlayers,
-} from "./sheets.js";
+import { INITIAL_STATS, INITIAL_HIDDEN } from "./game.js";
 
-const HISTORY_PATH = process.env.HISTORY_PATH ?? "./data/history.json";
-const MAX_TURNS    = Number(process.env.MAX_TURNS ?? 24);
+const DATA_PATH = process.env.DATA_PATH ?? "./data/players.json";
+const MAX_TURNS = Number(process.env.MAX_TURNS ?? 24);
 
-// -- 히스토리 로컬 저장 -------------------------------------------
-function ensureDir(p) {
-  const dir = path.dirname(p);
+function ensureDir() {
+  const dir = path.dirname(DATA_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function loadHistory() {
-  ensureDir(HISTORY_PATH);
-  if (!fs.existsSync(HISTORY_PATH)) return {};
-  try { return JSON.parse(fs.readFileSync(HISTORY_PATH, "utf-8")); }
-  catch { return {}; }
+function load() {
+  ensureDir();
+  if (!fs.existsSync(DATA_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(DATA_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
 }
 
-function saveHistory(data) {
-  ensureDir(HISTORY_PATH);
-  fs.writeFileSync(HISTORY_PATH, JSON.stringify(data, null, 2), "utf-8");
+function save(data) {
+  ensureDir();
+  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), "utf-8");
 }
 
-function getPlayerHistory(accountId) {
-  return loadHistory()[accountId] ?? [];
+export function getPlayer(accountId, displayName) {
+  const data = load();
+  if (!data[accountId]) {
+    data[accountId] = {
+      accountId,
+      name:      displayName,
+      stats:     { ...INITIAL_STATS },
+      hidden:    { ...INITIAL_HIDDEN },
+      gold:      500,
+      inventory: [],
+      equipped:  {},
+      turn:      1,
+      history:   [],
+    };
+    save(data);
+  }
+  return data[accountId];
 }
 
-function appendHistory(accountId, entry) {
-  const data          = loadHistory();
-  data[accountId]     = [...(data[accountId] ?? []), entry];
-  saveHistory(data);
+export function updatePlayer(player) {
+  const data             = load();
+  data[player.accountId] = player;
+  save(data);
 }
 
-// -- 플레이어 조회 / 생성 -----------------------------------------
-export async function getPlayer(accountId, displayName) {
-  const player  = await sheetGetPlayer(accountId, displayName);
-  player.history = getPlayerHistory(accountId);
-  return player;
+export function getAllPlayers() {
+  return Object.values(load());
 }
 
-// -- 플레이어 저장 ------------------------------------------------
-export async function updatePlayer(player) {
-  const { history, ...sheetData } = player;
-  await sheetUpdatePlayer(sheetData);
+export function processPlayer(accountId, applyFn) {
+  const data = load();
+  if (!data[accountId]) return null;
+  const processed       = applyFn(data[accountId]);
+  data[accountId]       = processed;
+  save(data);
+  return processed;
 }
 
-// -- 전체 플레이어 조회 -------------------------------------------
-export async function getAllPlayers() {
-  const players = await sheetGetAllPlayers();
-  return players.map((p) => ({ ...p, history: getPlayerHistory(p.accountId) }));
-}
-
-// -- 턴 즉시 처리 -------------------------------------------------
-export async function processPlayer(accountId, applyFn) {
-  const player  = await getPlayer(accountId, "");
-  if (!player)  return null;
-
-  const updated = await applyFn(player);
-
-  // 히스토리는 로컬에만
-  const lastEntry = updated.history.at(-1);
-  if (lastEntry) appendHistory(accountId, lastEntry);
-
-  // 시트에는 히스토리 제외
-  const { history, ...sheetData } = updated;
-  await sheetUpdatePlayer(sheetData);
-
-  return updated;
-}
-
-// -- 이미 이번 턴을 제출했는지 확인 --------------------------------
-export async function hasSubmittedThisTurn(accountId, displayName) {
-  const player = await getPlayer(accountId, displayName);
+// 수정: applyActions 후 turn이 N+1이 되므로 last.turn === player.turn - 1 로 비교
+export function hasSubmittedThisTurn(accountId, displayName) {
+  const player = getPlayer(accountId, displayName);
   const last   = player.history.at(-1);
-  return last?.turn === player.turn;
+  return last?.turn === player.turn - 1;
 }
 
-// -- 커뮤니티 종료 여부 확인 ---------------------------------------
-export async function isEnded(accountId, displayName) {
-  const player = await getPlayer(accountId, displayName);
+export function isEnded(accountId, displayName) {
+  const player = getPlayer(accountId, displayName);
   return player.turn > MAX_TURNS;
 }
